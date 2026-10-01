@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Агенты — локальное пространство</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="#"><span class="brand-icon">А</span> Агенты <span class="brand-note">Локальное пространство</span></a><span class="local-badge">На вашем компьютере</span></header>
+  <main>
+    <div id="global-error" class="notice error" role="alert" hidden></div>
+    <section id="home">
+      <div class="page-heading"><div><p class="eyebrow">ВАШЕ РАБОЧЕЕ ПРОСТРАНСТВО</p><h1>Агенты</h1><p class="muted">Создавайте помощников и сохраняйте разговоры в одном месте.</p></div><button id="add-agent" class="primary">＋ Добавить агента</button></div>
+      <div id="agent-grid" class="agent-grid"></div>
+      <div id="empty-agents" class="empty large" hidden><div class="empty-symbol">＋</div><h2>Здесь появятся ваши агенты</h2><p>Добавьте первого помощника, задайте имя и инструкцию.<br>Подключение модели будет доступно на следующем этапе.</p><button id="add-first" class="primary">Добавить агента</button></div>
+    </section>
+    <section id="agent-page" hidden>
+      <a href="#" class="back">← Все агенты</a>
+      <div class="page-heading agent-heading"><div><h1 id="agent-name"></h1><p id="agent-description" class="muted"></p></div><span class="model-badge">Модель не подключена</span></div>
+      <div class="tabs" role="tablist" aria-label="Разделы агента"><button id="chat-tab" role="tab" aria-selected="true" aria-controls="chat-panel">Чат</button><button id="settings-tab" role="tab" aria-selected="false" aria-controls="settings-panel">Настройки</button></div>
+      <section id="chat-panel" class="chat-layout" role="tabpanel" aria-labelledby="chat-tab">
+        <aside class="conversations"><div class="sidebar-heading"><h2>Разговоры</h2><button id="new-conversation" class="small" title="Создать разговор">＋ Новый</button></div><div id="conversation-list"></div></aside>
+        <div class="chat-main"><div id="messages" class="messages" aria-label="История сообщений"></div><form id="message-form" class="composer"><div id="chat-notice" class="notice" role="status" hidden></div><label for="message-input">Ваше сообщение</label><textarea id="message-input" rows="3" maxlength="50000" placeholder="Напишите сообщение…"></textarea><div class="composer-footer"><span class="muted">Enter — отправить · Shift + Enter — новая строка</span><div><button type="button" disabled title="Модель не подключена">Остановить</button><button id="send-message" class="primary" type="submit">Отправить</button></div></div></form></div>
+      </section>
+      <section id="settings-panel" role="tabpanel" aria-labelledby="settings-tab" hidden><form id="settings-form" class="settings"><h2>Настройки агента</h2><label for="settings-name">Имя <span class="required">*</span></label><input id="settings-name" required maxlength="120"><label for="settings-description">Краткое описание</label><textarea id="settings-description" rows="2" maxlength="500"></textarea><label for="settings-instruction">Инструкция для агента</label><textarea id="settings-instruction" rows="9" maxlength="50000" placeholder="Опишите роль, задачи и стиль общения агента"></textarea><p class="muted">Инструкция сохранится и будет использоваться после подключения модели.</p><div id="settings-notice" class="notice" role="status" hidden></div><div class="settings-actions"><button type="submit" class="primary">Сохранить изменения</button><button type="button" id="delete-agent" class="danger">Удалить агента</button></div></form></section>
+    </section>
+  </main>
+  <dialog id="create-dialog"><form id="create-form"><div class="dialog-heading"><h2>Новый агент</h2><button type="button" id="close-dialog" aria-label="Закрыть">×</button></div><label for="create-name">Имя <span class="required">*</span></label><input id="create-name" required maxlength="120" placeholder="Например, Редактор"><label for="create-description">Краткое описание</label><textarea id="create-description" rows="2" maxlength="500" placeholder="Чем будет помогать агент"></textarea><label for="create-instruction">Инструкция для агента</label><textarea id="create-instruction" rows="5" maxlength="50000" placeholder="Роль, задачи и стиль общения"></textarea><div id="create-notice" class="notice error" role="alert" hidden></div><div class="dialog-actions"><button type="button" id="cancel-create">Отмена</button><button type="submit" class="primary">Создать агента</button></div></form></dialog>
+</body>
+</html>
