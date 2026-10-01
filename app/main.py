@@ -1,4 +1,4 @@
-"""Local HTTP API and static interface; no model or tool execution."""
+"""Local HTTP API and static interface. Tool execution is not implemented."""
 import logging
 import sqlite3
 from contextlib import asynccontextmanager
@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from .db import DEFAULT_PATH, connect, initialize
 from .connections import router as connections_router, validate_selection, agent_view
 from .secret_store import SecretStore
+from .chat import ChatService, ensure_idle
 
 
 class AgentInput(BaseModel):
@@ -21,6 +22,8 @@ class AgentInput(BaseModel):
     instruction: str = Field(default='', max_length=50000)
     connection_id: int | None = Field(default=None, gt=0)
     model_id: str | None = Field(default=None, min_length=1)
+    web_search: bool = False
+    code_interpreter: bool = False
 
     @field_validator('name')
     @classmethod
@@ -49,15 +52,19 @@ def require(connection, table, item_id):
     return dict(row)
 
 
-def create_app(database_path=DEFAULT_PATH, secrets_path=None, providers=None):
+def create_app(database_path=DEFAULT_PATH, secrets_path=None, providers=None, chat_providers=None):
+    secrets = SecretStore(secrets_path or Path(database_path).resolve().parent.parent / 'secrets')
+    chat = ChatService(database_path, secrets, chat_providers)
     @asynccontextmanager
     async def lifespan(app):
         initialize(database_path)
+        chat.recover()
         yield
+        await chat.close()
 
     app = FastAPI(title='Локальные агенты', lifespan=lifespan)
-    secrets = SecretStore(secrets_path or Path(database_path).resolve().parent.parent / 'secrets')
     app.include_router(connections_router(database_path, secrets, providers))
+    app.include_router(chat.router)
 
     @app.exception_handler(OSError)
     async def storage_error(request, exc):
@@ -81,8 +88,8 @@ def create_app(database_path=DEFAULT_PATH, secrets_path=None, providers=None):
     def add_agent(body: AgentInput):
         with connect(database_path) as con:
             validate_selection(con, body)
-            cursor = con.execute('INSERT INTO agents(name, description, instruction, connection_id, model_id) VALUES (?, ?, ?, ?, ?)',
-                                 (body.name, body.description, body.instruction, body.connection_id, body.model_id))
+            cursor = con.execute('INSERT INTO agents(name, description, instruction, connection_id, model_id, web_search, code_interpreter) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                                 (body.name, body.description, body.instruction, body.connection_id, body.model_id, body.web_search, body.code_interpreter))
             return agent_view(con, require(con, 'agents', cursor.lastrowid))
 
     @app.get('/api/agents/{agent_id}')
@@ -95,8 +102,8 @@ def create_app(database_path=DEFAULT_PATH, secrets_path=None, providers=None):
         with connect(database_path) as con:
             previous = require(con, 'agents', agent_id)
             validate_selection(con, body, previous)
-            con.execute('UPDATE agents SET name=?, description=?, instruction=?, connection_id=?, model_id=? WHERE id=?',
-                        (body.name, body.description, body.instruction, body.connection_id, body.model_id, agent_id))
+            con.execute('UPDATE agents SET name=?, description=?, instruction=?, connection_id=?, model_id=?, web_search=?, code_interpreter=? WHERE id=?',
+                        (body.name, body.description, body.instruction, body.connection_id, body.model_id, body.web_search, body.code_interpreter, agent_id))
             return agent_view(con, require(con, 'agents', agent_id))
 
     @app.delete('/api/agents/{agent_id}', status_code=204)
@@ -119,6 +126,15 @@ def create_app(database_path=DEFAULT_PATH, secrets_path=None, providers=None):
             cursor = con.execute("INSERT INTO conversations(agent_id, title) VALUES (?, 'Новый разговор')", (agent_id,))
             return require(con, 'conversations', cursor.lastrowid)
 
+    @app.delete('/api/conversations/{conversation_id}', status_code=204)
+    def delete_conversation(conversation_id: int):
+        with connect(database_path) as con:
+            con.execute('BEGIN IMMEDIATE')
+            require(con, 'conversations', conversation_id)
+            ensure_idle(con, conversation_id)
+            con.execute('DELETE FROM conversations WHERE id=?', (conversation_id,))
+        return Response(status_code=204)
+
     @app.get('/api/conversations/{conversation_id}/messages')
     def list_messages(conversation_id: int):
         with connect(database_path) as con:
@@ -128,7 +144,9 @@ def create_app(database_path=DEFAULT_PATH, secrets_path=None, providers=None):
     @app.post('/api/conversations/{conversation_id}/messages', status_code=201)
     def add_message(conversation_id: int, body: MessageInput):
         with connect(database_path) as con:
+            con.execute('BEGIN IMMEDIATE')
             require(con, 'conversations', conversation_id)
+            ensure_idle(con, conversation_id)
             first = con.execute('SELECT 1 FROM messages WHERE conversation_id=? LIMIT 1', (conversation_id,)).fetchone() is None
             cursor = con.execute('INSERT INTO messages(conversation_id, content) VALUES (?, ?)', (conversation_id, body.content))
             if first:

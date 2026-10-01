@@ -33,3 +33,21 @@ def fixture_provider(path, key, folder):
     else:
         reply = json.dumps(value).encode()
     return fetch_models(key, folder, opener=FakeOpener(reply))
+
+
+async def fixture_chat_provider(directory, key, folder, model, messages, tools=None):
+    import asyncio
+    import httpx
+    from app.providers.yandex_chat import complete
+
+    async def handle(request):
+        settings = json.loads((directory / 'chat-response.json').read_text(encoding='utf-8'))
+        (directory / 'chat-request.json').write_text(request.content.decode(), encoding='utf-8')
+        await asyncio.sleep(settings.get('delay', 0))
+        if settings.get('timeout'):
+            raise httpx.ReadTimeout('dummy secret must not leak')
+        default = {'status': 'completed', 'output': [{'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Ответ с инструментами'}]}]} if tools else {
+            'choices': [{'message': {'role': 'assistant', 'content': 'Тестовый ответ <script>не выполнять</script>'}, 'finish_reason': 'stop'}]
+        }
+        return httpx.Response(settings.get('status', 200), json=settings.get('body', default))
+    return await complete(key, folder, model, messages, transport=httpx.MockTransport(handle), tools=tools)

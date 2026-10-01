@@ -134,7 +134,7 @@ class MigrationTests(unittest.TestCase):
             initialize(path)
             with connect(path) as con:
                 agent = dict(con.execute('SELECT * FROM agents').fetchone())
-                self.assertEqual(agent, {'id': 7, 'name': 'Legacy', 'description': 'description', 'instruction': 'instruction', 'created_at': 'old', 'connection_id': None, 'model_id': None})
+                self.assertEqual(agent, {'id': 7, 'name': 'Legacy', 'description': 'description', 'instruction': 'instruction', 'created_at': 'old', 'connection_id': None, 'model_id': None, 'web_search': 0, 'code_interpreter': 0})
                 self.assertEqual(tuple(con.execute('SELECT * FROM conversations').fetchone()), (12, 7, 'Conversation', 'old'))
                 self.assertEqual(tuple(con.execute('SELECT * FROM messages').fetchone()), (23, 12, 'user', 'Preserve exact message', 'old'))
                 self.assertEqual(con.execute('PRAGMA foreign_key_check').fetchall(), [])

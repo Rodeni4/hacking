@@ -46,7 +46,8 @@ def initialize(path):
             CREATE INDEX IF NOT EXISTS conversations_agent ON conversations(agent_id, id);
             CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id, id);
         """)
-        # Additive migration: existing agents, conversations and messages stay intact.
+        connection.execute('BEGIN IMMEDIATE')
+        # Existing agents, conversations and messages stay intact.
         connection.execute("""CREATE TABLE IF NOT EXISTS connections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -58,8 +59,41 @@ def initialize(path):
             models_folder_id TEXT
         )""")
         columns = {row['name'] for row in connection.execute('PRAGMA table_info(agents)')}
+        for name in ('web_search', 'code_interpreter'):
+            if name not in columns:
+                connection.execute(f'ALTER TABLE agents ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0 CHECK({name} IN (0,1))')
         if 'connection_id' not in columns:
             connection.execute('ALTER TABLE agents ADD COLUMN connection_id INTEGER REFERENCES connections(id) ON DELETE RESTRICT')
         if 'model_id' not in columns:
             connection.execute('ALTER TABLE agents ADD COLUMN model_id TEXT')
-        connection.execute('PRAGMA user_version = 2')
+        if connection.execute('PRAGMA user_version').fetchone()[0] < 3:
+            # SQLite cannot alter a CHECK constraint. Copy inside one transaction,
+            # retaining primary keys, timestamps and every existing message.
+            connection.execute("""CREATE TABLE messages_v3 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'assistant')),
+                content TEXT NOT NULL CHECK(length(trim(content)) > 0),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            )""")
+            connection.execute('INSERT INTO messages_v3 SELECT * FROM messages')
+            connection.execute('DROP TABLE messages')
+            connection.execute('ALTER TABLE messages_v3 RENAME TO messages')
+            connection.execute('CREATE INDEX messages_conversation ON messages(conversation_id, id)')
+            connection.execute('PRAGMA user_version = 3')
+        connection.execute("""CREATE TABLE IF NOT EXISTS generations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            user_message_id INTEGER NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+            assistant_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+            model_id TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('running','completed','failed','cancelled')),
+            error TEXT,
+            finish_reason TEXT,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        )""")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_generation_per_conversation ON generations(conversation_id) WHERE status='running'")
+        generation_columns = {row['name'] for row in connection.execute('PRAGMA table_info(generations)')}
+        for name in ('started_at', 'finished_at', 'diagnostics_json'):
+            if name not in generation_columns:
+                connection.execute(f'ALTER TABLE generations ADD COLUMN {name} TEXT')

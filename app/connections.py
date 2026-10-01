@@ -76,6 +76,8 @@ def validate_selection(con, body, previous=None):
 
 def agent_view(con, row):
     agent = dict(row)
+    for name in ('web_search', 'code_interpreter'):
+        agent[name] = bool(agent[name])
     agent.update(source=None, connection_name=None, model_missing=False)
     if agent['connection_id'] is not None:
         connection = get_connection(con, agent['connection_id'])
