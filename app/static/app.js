@@ -26,7 +26,8 @@ async function api(path, method = 'GET', body) {
   return response.status === 204 ? null : response.json();
 }
 function readAgent(prefix) {
-  return {name: $(prefix + '-name').value.trim(), description: $(prefix + '-description').value, instruction: $(prefix + '-instruction').value};
+  return {name: $(prefix + '-name').value.trim(), description: $(prefix + '-description').value, instruction: $(prefix + '-instruction').value,
+    connection_id: Number($(prefix + '-connection').value) || null, model_id: $(prefix + '-model').value || null};
 }
 function setTab(name) {
   for (const tab of ['chat', 'settings']) {
@@ -37,6 +38,9 @@ function setTab(name) {
 function renderAgent() {
   $('agent-name').textContent = state.agent.name;
   $('agent-description').textContent = state.agent.description || 'Добавьте описание в настройках агента.';
+  $('agent-model').textContent = modelLabel(state.agent);
+  $('model-status').textContent = state.agent.model_id ? 'Модель выбрана. Ответы ещё не подключены' : 'Модель не подключена';
+  notice('agent-model-warning', state.agent.model_missing ? 'Выбранная модель отсутствует в актуальном списке. Прежний выбор сохранён; выберите другую модель вручную при необходимости.' : '', true);
 }
 function rememberDraft() {
   if (state.conversation) state.drafts.set(state.conversation, $('message-input').value);
@@ -84,7 +88,7 @@ async function selectConversation(id) {
     const messages = await api(`/conversations/${id}/messages`);
     if (epoch !== state.epoch) return;
     $('messages').replaceChildren();
-    if (!messages.length) emptyMessages('Разговор пока пуст', 'Вы можете сохранить сообщение. Для ответа потребуется подключить модель.');
+    if (!messages.length) emptyMessages('Разговор пока пуст', 'Вы можете сохранить сообщение. Ответы моделей ещё не подключены.');
     messages.forEach(addMessage);
     chatEnabled(true);
   } catch (error) {
@@ -99,10 +103,15 @@ async function route() {
   const epoch = ++state.epoch;
   notice('global-error');
   const match = location.hash.match(/^#agent\/(\d+)$/);
-  $('home').hidden = !!match;
+  const connectionsPage = location.hash === '#connections';
+  $('home').hidden = !!match || connectionsPage;
+  $('connections-page').hidden = !connectionsPage;
   $('agent-page').hidden = true;
   state.conversation = null;
   try {
+    await loadConnections();
+    if (epoch !== state.epoch) return;
+    if (connectionsPage) { renderConnectionList(); return; }
     if (!match) {
       state.agent = null;
       $('agent-grid').replaceChildren();
@@ -113,7 +122,9 @@ async function route() {
       for (const agent of agents) {
         const card = element('a', 'agent-card');
         card.href = '#agent/' + agent.id;
-        card.append(element('div', 'avatar', Array.from(agent.name)[0].toUpperCase()), element('h2', '', agent.name), element('p', 'muted', agent.description || 'Описание пока не добавлено'), element('div', 'card-footer', 'Модель не подключена →'));
+        card.append(element('div', 'avatar', Array.from(agent.name)[0].toUpperCase()), element('h2', '', agent.name), element('p', 'muted', agent.description || 'Описание пока не добавлено'), element('div', 'card-footer', modelLabel(agent)));
+        if (agent.model_missing) card.append(element('p', 'warning-text', 'Модель отсутствует в актуальном списке. Выбор сохранён.'));
+        card.append(element('span', '', 'Открыть чат →'));
         $('agent-grid').append(card);
       }
     } else {
@@ -123,6 +134,7 @@ async function route() {
       state.conversations = conversations;
       renderAgent();
       for (const field of ['name', 'description', 'instruction']) $('settings-' + field).value = agent[field];
+      populatePicker('settings', agent.connection_id, agent.model_id);
       notice('settings-notice');
       $('agent-page').hidden = false;
       setTab('chat');
@@ -147,7 +159,7 @@ async function write(button, noticeId, action) {
     if (hash !== location.hash) await route();
   }
 }
-function openCreate() { notice('create-notice'); $('create-dialog').showModal(); $('create-name').focus(); }
+function openCreate() { notice('create-notice'); populatePicker('create', Number($('create-connection').value) || null, $('create-model').value); $('create-dialog').showModal(); $('create-name').focus(); }
 $('add-agent').onclick = openCreate;
 $('add-first').onclick = openCreate;
 for (const id of ['close-dialog', 'cancel-create']) $(id).onclick = () => { if (!state.busy) $('create-dialog').close(); };
@@ -202,7 +214,7 @@ $('message-form').onsubmit = event => {
     if (item && $('messages').querySelectorAll('.message').length === 1) item.title = content.trim().replace(/\s+/g, ' ').slice(0, 60);
     $('message-input').value = '';
     state.drafts.delete(id);
-    notice('chat-notice', 'Сообщение сохранено. Для ответа подключите модель');
+    notice('chat-notice', state.agent.model_id ? 'Сообщение сохранено. Модель выбрана. Ответы ещё не подключены' : 'Сообщение сохранено. Для ответа подключите модель');
   }).finally(() => { $('message-input').readOnly = false; $('message-input').focus(); });
 };
 $('message-input').addEventListener('input', rememberDraft);
@@ -215,4 +227,3 @@ $('message-input').onkeydown = event => {
 $('chat-tab').onclick = () => setTab('chat');
 $('settings-tab').onclick = () => setTab('settings');
 window.addEventListener('hashchange', route);
-route();

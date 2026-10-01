@@ -31,8 +31,7 @@ class AppTests(unittest.TestCase):
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
         self.url = f'http://127.0.0.1:{port}'
-        script = ('import os, uvicorn; from app.main import create_app; '
-                  f'uvicorn.run(create_app(os.environ["TEST_DB"]), host="127.0.0.1", port={port}, log_level="error")')
+        script = self.server_code(port)
         self.process = subprocess.Popen([sys.executable, '-c', script], cwd=ROOT,
                                         env={**os.environ, 'TEST_DB': self.database},
                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -45,6 +44,10 @@ class AppTests(unittest.TestCase):
             except OSError:
                 time.sleep(.1)
         self.fail('HTTP server did not start')
+
+    def server_code(self, port):
+        return ('import os, uvicorn; from app.main import create_app; '
+                f'uvicorn.run(create_app(os.environ["TEST_DB"], secrets_path=os.environ["TEST_DB"] + ".secrets"), host="127.0.0.1", port={port}, log_level="error")')
 
     def stop(self):
         if self.process is not None:

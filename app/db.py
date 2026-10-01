@@ -46,3 +46,20 @@ def initialize(path):
             CREATE INDEX IF NOT EXISTS conversations_agent ON conversations(agent_id, id);
             CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id, id);
         """)
+        # Additive migration: existing agents, conversations and messages stay intact.
+        connection.execute("""CREATE TABLE IF NOT EXISTS connections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT 'yandex',
+            folder_id TEXT NOT NULL,
+            secret_ref TEXT NOT NULL,
+            models_json TEXT NOT NULL DEFAULT '[]',
+            models_updated_at TEXT,
+            models_folder_id TEXT
+        )""")
+        columns = {row['name'] for row in connection.execute('PRAGMA table_info(agents)')}
+        if 'connection_id' not in columns:
+            connection.execute('ALTER TABLE agents ADD COLUMN connection_id INTEGER REFERENCES connections(id) ON DELETE RESTRICT')
+        if 'model_id' not in columns:
+            connection.execute('ALTER TABLE agents ADD COLUMN model_id TEXT')
+        connection.execute('PRAGMA user_version = 2')

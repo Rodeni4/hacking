@@ -11,12 +11,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from .db import DEFAULT_PATH, connect, initialize
+from .connections import router as connections_router, validate_selection, agent_view
+from .secret_store import SecretStore
 
 
 class AgentInput(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default='', max_length=500)
     instruction: str = Field(default='', max_length=50000)
+    connection_id: int | None = Field(default=None, gt=0)
+    model_id: str | None = Field(default=None, min_length=1)
 
     @field_validator('name')
     @classmethod
@@ -45,13 +49,19 @@ def require(connection, table, item_id):
     return dict(row)
 
 
-def create_app(database_path=DEFAULT_PATH):
+def create_app(database_path=DEFAULT_PATH, secrets_path=None, providers=None):
     @asynccontextmanager
     async def lifespan(app):
         initialize(database_path)
         yield
 
     app = FastAPI(title='Локальные агенты', lifespan=lifespan)
+    secrets = SecretStore(secrets_path or Path(database_path).resolve().parent.parent / 'secrets')
+    app.include_router(connections_router(database_path, secrets, providers))
+
+    @app.exception_handler(OSError)
+    async def storage_error(request, exc):
+        return JSONResponse(status_code=500, content={'detail': 'Не удалось прочитать или сохранить файл ключа. Проверьте доступ к папке secrets/.'})
 
     @app.exception_handler(sqlite3.Error)
     async def database_error(request, exc):
@@ -65,27 +75,29 @@ def create_app(database_path=DEFAULT_PATH):
     @app.get('/api/agents')
     def list_agents():
         with connect(database_path) as con:
-            return [dict(row) for row in con.execute('SELECT * FROM agents ORDER BY id DESC')]
+            return [agent_view(con, row) for row in con.execute('SELECT * FROM agents ORDER BY id DESC')]
 
     @app.post('/api/agents', status_code=201)
     def add_agent(body: AgentInput):
         with connect(database_path) as con:
-            cursor = con.execute('INSERT INTO agents(name, description, instruction) VALUES (?, ?, ?)',
-                                 (body.name, body.description, body.instruction))
-            return require(con, 'agents', cursor.lastrowid)
+            validate_selection(con, body)
+            cursor = con.execute('INSERT INTO agents(name, description, instruction, connection_id, model_id) VALUES (?, ?, ?, ?, ?)',
+                                 (body.name, body.description, body.instruction, body.connection_id, body.model_id))
+            return agent_view(con, require(con, 'agents', cursor.lastrowid))
 
     @app.get('/api/agents/{agent_id}')
     def get_agent(agent_id: int):
         with connect(database_path) as con:
-            return require(con, 'agents', agent_id)
+            return agent_view(con, require(con, 'agents', agent_id))
 
     @app.put('/api/agents/{agent_id}')
     def edit_agent(agent_id: int, body: AgentInput):
         with connect(database_path) as con:
-            require(con, 'agents', agent_id)
-            con.execute('UPDATE agents SET name=?, description=?, instruction=? WHERE id=?',
-                        (body.name, body.description, body.instruction, agent_id))
-            return require(con, 'agents', agent_id)
+            previous = require(con, 'agents', agent_id)
+            validate_selection(con, body, previous)
+            con.execute('UPDATE agents SET name=?, description=?, instruction=?, connection_id=?, model_id=? WHERE id=?',
+                        (body.name, body.description, body.instruction, body.connection_id, body.model_id, agent_id))
+            return agent_view(con, require(con, 'agents', agent_id))
 
     @app.delete('/api/agents/{agent_id}', status_code=204)
     def delete_agent(agent_id: int):
